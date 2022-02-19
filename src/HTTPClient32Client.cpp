@@ -73,7 +73,7 @@ HTTPClient32* HTTPClient32::setAuthBearer(String token) {
 
 bool HTTPClient32::GET(String host, uint16_t port, String uri, bool secure, const char* rootCACertificate) {
 	setBody(NULL);
-	Serial.println("i ma going to create a GET Request");
+	DEBUGLN("i ma going to create a GET Request");
 	if (secure) {
 		prepareHTTPS(METHOD_TYPE::HTTP_GET, host, port, uri, rootCACertificate);
 	} else {
@@ -96,7 +96,7 @@ bool HTTPClient32::POST(String host, uint16_t port, String uri, bool secure, con
 		DEBUGLN("POST content is empty");
 		return false;
 	}
-	Serial.println("i ma going to create a POST Request");
+	DEBUGLN("i ma going to create a POST Request");
 	if (secure) {
 		prepareHTTPS(METHOD_TYPE::HTTP_POST, host, port, uri, rootCACertificate);
 	} else {
@@ -106,7 +106,7 @@ bool HTTPClient32::POST(String host, uint16_t port, String uri, bool secure, con
 }		
 
 HTTPClient32* HTTPClient32::prepareHTTP(METHOD_TYPE method, String host, uint16_t port, String uri) {
-	Serial.println("try to create new request: " + method);
+	DEBUGLN("try to create new request: " + method);
 	setRequest(new HTTPRequest(false, method, host, port, uri));
 	return this;
 }
@@ -186,23 +186,30 @@ bool HTTPClient32::send() {
 	if (!response) {
 		setResponseToString();
 	}
-	Serial.println("current http request method is: " + this->request->method);
+	DEBUGLN("current http request method is: " + this->request->method);
 	if (!client->connect(this->request->host.c_str(), this->request->port)) {
 		DEBUGLN("Couldnt connect!");
 		this->response->onError(REQUEST_ERROR::NO_CONNECTION);
 		return false;
 	}
 	String buf = this->request->method + F(" ") + this->request->uri + String(" HTTP/1.1");
-    Serial.println(buf);
 	DEBUGLN(buf);
 	client->println(buf);
 	
 	sendHeader(F("Host"), this->request->host);
+	sendHeader(F("accept"), F("*/*"));
+	sendHeader(F("accept-encoding"), F("gzip, deflate, br"));
+	sendHeader(F("accept-language"), F("zh-cn"));
+	sendHeader(F("user-agent"), F("eps32-arduino"));
+	sendHeader(F("connection"), F("keep-alive"));
+	sendHeader(F("connection"), F("keep-alive"));
+	// sendHeader(F("accept", F("*/*")));
 
 	for (uint8_t i = 0; i < requestHeaders->size(); i++) {
 		HTTPClient32Headers::Header* h = requestHeaders->get(i);
 		sendHeader(h->name, h->value);
 	}
+
 	if (this->request->methodType == METHOD_TYPE::HTTP_POST) {
 		if (body) {
 			DEBUGLN("Sending POST size");
@@ -215,6 +222,7 @@ bool HTTPClient32::send() {
 			DEBUGLN("ERROR! Body is empty!");
 		}
 	} else {
+		
 		DEBUGLN("Headers sent");
 		DEBUGLN();
 		client->println();
@@ -235,13 +243,19 @@ bool HTTPClient32::handleHeaderResponse()
 	unsigned long responseStarted = lastDataTime;
 	bool firstLine = true;
 	HTTPClient32Headers* responseHeaders = this->response->getHeaders();
+	DEBUGLN("start read header");
 	while(client->connected()) {
 		size_t len = client->available();
+		// if (true) {
+		// 	String headers = client->readString();
+		// 	DEBUGLN(headers);
+		// } else 
 		if(len > 0) {
 			String headerLine = client->readStringUntil('\n');
 			headerLine.trim(); // remove \r
 			lastDataTime = millis();
 			DEBUGLN(headerLine);
+
 			if (firstLine) {
 				firstLine = false;
 				int codePos = headerLine.indexOf(' ') + 1;
@@ -255,8 +269,14 @@ bool HTTPClient32::handleHeaderResponse()
 				}
 				if (headerName.length() > 0) {
 					responseHeaders->set(headerName, headerValue);
+					this->response->setChunked(
+						headerName.equalsIgnoreCase(F("Transfer-Encoding")) &&
+						headerValue.equalsIgnoreCase(F("chunked")));
 				}
+			} else {
+				DEBUGLN("this line is not a standard headline");
 			}
+
 			if (headerLine == "") {
 				DEBUG("code: ");
 				DEBUGLN(returnCode);
@@ -267,6 +287,7 @@ bool HTTPClient32::handleHeaderResponse()
 					DEBUGLN(_size);
 				}
 				if(returnCode) {
+					DEBUGLN("handle response!");
 					handleResponseBody(_size, responseStarted);
 					return true;
 				}
@@ -291,6 +312,7 @@ bool HTTPClient32::handleHeaderResponse()
 void HTTPClient32::handleResponseBody(size_t expectedSize, unsigned long responseStarted) {
 	size_t bodySize = 0;
 	//unsigned long start = millis();
+	bool firstLine = true;
 	while (client->connected()) {
 		if ((millis() - responseStarted) >= this->request->responseTimeout) {
 			DEBUGLN("Response (READ) timeout!");
@@ -298,8 +320,20 @@ void HTTPClient32::handleResponseBody(size_t expectedSize, unsigned long respons
 			return;
 		}
 		while (client->available()) {
-			this->response->print(client->read());
-			bodySize++;
+			String bodyLine = client->readStringUntil('\n');
+			DEBUG("response string is:");
+			DEBUGLN(bodyLine);
+			if (firstLine) {
+				this->response->setChunkedPos(bodyLine);
+				firstLine = false;
+			} else if (client->available()) {
+				// real body
+				this->response->print(bodyLine);
+				bodySize += bodyLine.length();
+			} else {
+				// last line
+				this->response->setChunkedSize(bodyLine.toInt());
+			}
 		}
 		if (bodySize > 0 && bodySize >= expectedSize) {
 			return;

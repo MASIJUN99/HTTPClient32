@@ -11,6 +11,10 @@ class HTTPClient32Response {
     protected:
         HTTPClient32Headers*    headers;
         uint16_t                returnCode = 0;
+        bool                    chunked = false;
+
+        String                  chunkedPos = "";
+        uint16_t                chunkedSize = 0;
 
     public:
         HTTPClient32Response();
@@ -25,9 +29,26 @@ class HTTPClient32Response {
             return returnCode;
         };
 
+        virtual bool isChunked() {
+            return chunked;
+        };
+
+        virtual void setChunked(bool e) {
+            this->chunked = e;
+        }
+
+        virtual void setChunkedPos(String pos) {
+            this->chunkedPos = pos;
+        }
+
+        virtual void setChunkedSize(uint16_t size) {
+            this->chunkedSize = size;
+        }
+
         virtual void onError(REQUEST_ERROR errCode) {};
 
         virtual void print(char c) = 0;
+        virtual void print(String c) = 0;
         virtual void expected(size_t size) {};
 };
 
@@ -47,6 +68,10 @@ class HTTPClient32ResponseString: public HTTPClient32Response {
             result += c;
         }
 
+        void print(String line) {
+            result += line;
+        }
+
         String getURIDecoded();
 };
 
@@ -61,6 +86,10 @@ class HTTPClient32ResponseFile: public HTTPClient32Response {
         void print(char c) {
             file.print(c);
         }
+
+        void print(String line) {
+            file.print(line);
+        }
 };
 
 class HTTPClient32ResponsePrint: public HTTPClient32Response {
@@ -73,5 +102,9 @@ class HTTPClient32ResponsePrint: public HTTPClient32Response {
 
         void print(char c) {
             prn->print(c);
+        }
+
+        void print(String line) {
+            prn->print(line);
         }
 };
